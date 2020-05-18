@@ -2,7 +2,7 @@ const puppeteer = require('puppeteer');
 
 const selectorNames = ['count', 'tested', 'hospitalizations', 'deaths']; 
 
-const jurisdictions = 
+const jurisdictionDefs = 
 [
     {
         'name': 'Utah',
@@ -60,9 +60,46 @@ const jurisdictions =
     },
 ];
 
+
+class Jurisdiction
+{
+    constructor(jurisdictionDef)
+    {
+        this.name = jurisdictionDef.name;
+        this.selectors = jurisdictionDef.selectors;
+        this.validators = jurisdictionDef.validators;
+        this.positiveCount = 0;
+        this.tested = 0;
+        this.hospitalizations = 0;
+        this.deaths = 0;
+    }
+
+    QueryAllSelectors(document)
+    {
+        for (const name in this.selectors)
+        {
+            const resultNode = document.querySelector(this.selectors[name]);
+            if (resultNode)
+            {
+                this[name] = resultNode.innerHtml;
+            }
+        }
+    }
+
+    SerializeAsCsv()
+    {
+        return [this.name, 
+            this.positiveCount, 
+            this.tested, 
+            this.hospitalizations,
+            this.deaths].join('.');
+    }
+}
+
+
 ;(async () =>
 {
-    const browser = await puppeteer.launch();
+    const browser = await puppeteer.launch({headless: false});
 
     const page = (await browser.pages())[0];
 
@@ -70,23 +107,68 @@ const jurisdictions =
 
     page.on('console', (log) => console[log._type](log._text));
 
-    let result;
+    let jurisdictions = [];
+
+    console.log(jurisdictionDefs);
+
+    jurisdictionDefs.forEach((jurisdictionDef) =>
+        {
+            console.log('Creating', jurisdictionDef.name);
+            jurisdictions.push(new Jurisdiction(jurisdictionDef))
+        });
+
     try
     {
-        result = await page.evaluate(Query, jurisdictions, selectorNames);
+        // result = await page.evaluate(Query, jurisdictions, selectorNames);
+
+        result = await page.evaluate((QueryAllSelectors, jurisdictions) =>
+            {
+                window.jurisdictions = jurisdictions;
+                jurisdictions.forEach((jurisdiction) =>
+                    {
+                        console.log(jurisdiction);
+                        QueryAllSelectors(jurisdiction);
+                    });
+
+                return jurisdictions;
+            },
+            QueryAllSelectors,
+            jurisdictions);
+
     }
     catch (e)
     {
         console.log('Caught Error:');
         console.log(e);
-        console.log('Closing Gracefully.')
-        await browser.close();
+        // console.log('Closing Gracefully.')
+        // await browser.close();
         return
     }
 
-    console.log(result);
+    let resultCsv = '';
+    jurisdictions.forEach((jurisdiction) =>
+    {
+        resultCsv += jurisdiction.SerializeAsCsv() + '\n';
+    });
+
+    console.log(resultCsv);
+
     await browser.close();
 })();
+
+function QueryAllSelectors(jurisdiction)
+{
+    for (const name in jurisdiction.selectors)
+    {
+        const resultNode = 
+            document.querySelector(jurisdiction.selectors[name]);
+        
+        if (resultNode)
+        {
+            jurisdiction[name] = resultNode.innerHtml;
+        }
+    }
+}
 
 function Query(jurisdictions, selectorNames)
 {
