@@ -1,19 +1,17 @@
 const puppeteer = require('puppeteer');
 
-const selectorNames = ['count', 'tested', 'hospitalizations', 'deaths']; 
-
-const jurisdictionDefs = 
+let jurisdictionDefs = 
 [
     {
         'name': 'Utah',
         'selectors':
         {
-            'count': '#total-covid-19-cases .value',
+            'positiveCount': '#total-covid-19-cases .value',
             'tested': '#total-reported-people-tested .value',
             'hospitalizations': '#total-covid-19-hospitalizations .value',
             'deaths': '#total-covid-19-deaths .value',
         },
-        'validations':
+        'validators':
         [
             {
                 'querySelector': '#total-covid-19-cases .caption',
@@ -25,7 +23,7 @@ const jurisdictionDefs =
         'name': 'Salt Lake County',
         'selectors':
         {
-            'count': 
+            'positiveCount': 
                 '#DataTables_Table_0 tbody tr:nth-of-type(4) td:nth-of-type(2)',
             'tested': null,
             'hospitalizations':
@@ -33,7 +31,7 @@ const jurisdictionDefs =
             'deaths':
                 '#DataTables_Table_0 tbody tr:nth-of-type(4) td:nth-of-type(4)',
         },
-        'validations':
+        'validators':
         [
             {
                 'querySelector': '#DataTables_Table_0 tbody tr:nth-of-type(4) \
@@ -61,6 +59,57 @@ const jurisdictionDefs =
 ];
 
 
+;(async () =>
+{
+    const browser = await puppeteer.launch({headless: true});
+
+    const page = (await browser.pages())[0];
+
+    await page.goto('https://coronavirus-dashboard.utah.gov/');
+
+    page.on('console', (log) => console[log._type](log._text));
+
+    try
+    {
+        jurisdictionDefs = await page.evaluate(Query, jurisdictionDefs);
+    }
+    catch (e)
+    {
+        console.log('Caught Error:');
+        console.log(e);
+        await browser.close();
+        return
+    }
+
+    jurisdictionDefs.forEach((jurisdictionDef) =>
+    {
+        let jurisdiction = new Jurisdiction(jurisdictionDef);
+        console.log(jurisdiction.SerializeAsCsv());
+    });
+
+    await browser.close();
+})();
+
+
+function Query(jurisdictionDefs)
+{
+    jurisdictionDefs.forEach((jurisdictionDef) => 
+    {
+        for (const name in jurisdictionDef.selectors)
+        {
+            let resultNode = 
+                document.querySelector(jurisdictionDef.selectors[name]);
+            if (resultNode)
+            {
+                jurisdictionDef[name] = resultNode.innerHTML;
+            }
+        }
+    });
+
+    return jurisdictionDefs;
+}
+
+
 class Jurisdiction
 {
     constructor(jurisdictionDef)
@@ -68,10 +117,10 @@ class Jurisdiction
         this.name = jurisdictionDef.name;
         this.selectors = jurisdictionDef.selectors;
         this.validators = jurisdictionDef.validators;
-        this.positiveCount = 0;
-        this.tested = 0;
-        this.hospitalizations = 0;
-        this.deaths = 0;
+        this.positiveCount = jurisdictionDef.positiveCount || 0;
+        this.tested = jurisdictionDef.tested || 0;
+        this.hospitalizations = jurisdictionDef.hospitalizations || 0;
+        this.deaths = jurisdictionDef.deaths || 0;
     }
 
     QueryAllSelectors(document)
@@ -92,117 +141,6 @@ class Jurisdiction
             this.positiveCount, 
             this.tested, 
             this.hospitalizations,
-            this.deaths].join('.');
+            this.deaths].join(',');
     }
-}
-
-
-;(async () =>
-{
-    const browser = await puppeteer.launch({headless: false});
-
-    const page = (await browser.pages())[0];
-
-    await page.goto('https://coronavirus-dashboard.utah.gov/');
-
-    page.on('console', (log) => console[log._type](log._text));
-
-    let jurisdictions = [];
-
-    console.log(jurisdictionDefs);
-
-    jurisdictionDefs.forEach((jurisdictionDef) =>
-        {
-            console.log('Creating', jurisdictionDef.name);
-            jurisdictions.push(new Jurisdiction(jurisdictionDef))
-        });
-
-    try
-    {
-        // result = await page.evaluate(Query, jurisdictions, selectorNames);
-
-        result = await page.evaluate((QueryAllSelectors, jurisdictions) =>
-            {
-                window.jurisdictions = jurisdictions;
-                jurisdictions.forEach((jurisdiction) =>
-                    {
-                        console.log(jurisdiction);
-                        QueryAllSelectors(jurisdiction);
-                    });
-
-                return jurisdictions;
-            },
-            QueryAllSelectors,
-            jurisdictions);
-
-    }
-    catch (e)
-    {
-        console.log('Caught Error:');
-        console.log(e);
-        // console.log('Closing Gracefully.')
-        // await browser.close();
-        return
-    }
-
-    let resultCsv = '';
-    jurisdictions.forEach((jurisdiction) =>
-    {
-        resultCsv += jurisdiction.SerializeAsCsv() + '\n';
-    });
-
-    console.log(resultCsv);
-
-    await browser.close();
-})();
-
-function QueryAllSelectors(jurisdiction)
-{
-    for (const name in jurisdiction.selectors)
-    {
-        const resultNode = 
-            document.querySelector(jurisdiction.selectors[name]);
-        
-        if (resultNode)
-        {
-            jurisdiction[name] = resultNode.innerHtml;
-        }
-    }
-}
-
-function Query(jurisdictions, selectorNames)
-{
-    let results = [];
-    jurisdictions.forEach((jurisdiction) =>
-    {
-        const jurisdictionName = jurisdiction.name;
-        if (typeof(jurisdictionName) === 'string')
-        {
-            let result = {'name': jurisdictionName};
-            const selectors = jurisdiction.selectors;
-            if (typeof(selectors) === 'object')
-            {
-                selectorNames.forEach((selectorName) =>
-                {
-                    const selector = selectors[selectorName];
-                    if (typeof(selector) === 'string')
-                    {
-                        const queryResult = document.querySelector(selector);
-                        if (queryResult)
-                        {
-                            const value = queryResult.innerHTML;
-                            result[selectorName] = value;
-                        }
-                        else
-                        {
-                            throw 'Query failed: "' + selector + '"';
-                        }
-                    }
-                });
-            }
-            results.push(result);
-        }
-    });
-    
-    return results;
 }
