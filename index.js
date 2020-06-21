@@ -1,146 +1,103 @@
-const puppeteer = require('puppeteer');
 
-let jurisdictionDefs = 
+// Utah Covid Data Scraper
+
+const puppeteer = require("puppeteer");
+const fs = require("fs");
+
+const recipes = require("./query_recipes.js");
+const tasks = require("./query_tasks.js");
+
+const dataFile = "covid.csv"
+
+const jurisdictionQueries = 
 [
-    {
-        'name': 'Utah',
-        'selectors':
-        {
-            'positiveCount': '#total-covid-19-cases .value',
-            'tested': '#total-reported-people-tested .value',
-            'hospitalizations': '#total-covid-19-hospitalizations .value',
-            'deaths': '#total-covid-19-deaths .value',
-        },
-        'validators':
-        [
-            {
-                'querySelector': '#total-covid-19-cases .caption',
-                'value': 'Total COVID-19 Cases',
-            }
-        ]
-    },
-    {
-        'name': 'Salt Lake County',
-        'selectors':
-        {
-            'positiveCount': 
-                '#DataTables_Table_0 tbody tr:nth-of-type(4) td:nth-of-type(2)',
-            'tested': null,
-            'hospitalizations':
-                '#DataTables_Table_0 tbody tr:nth-of-type(4) td:nth-of-type(3)',
-            'deaths':
-                '#DataTables_Table_0 tbody tr:nth-of-type(4) td:nth-of-type(4)',
-        },
-        'validators':
-        [
-            {
-                'querySelector': '#DataTables_Table_0 tbody tr:nth-of-type(4) \
-                    td:nth-of-type(0)',
-                'value': 'Salt Lake County',
-            },
-            {
-                'querySelector': '#DataTables_Table_0 thead td:nth-of-type(0)',
-                'value': 'Jurisdiction',
-            },
-            {
-                'querySelector': '#DataTables_Table_0 thead td:nth-of-type(1)',
-                'value': 'Cases',
-            },
-            {
-                'querySelector': '#DataTables_Table_0 thead td:nth-of-type(2)',
-                'value': 'Hospitalizations',
-            },
-            {
-                'querySelector': '#DataTables_Table_0 thead td:nth-of-type(3)',
-                'value': 'Deaths',
-            },
-        ],
-    },
+    recipes.CreateMainJurisdictionQuery("Utah"),
+    recipes.CreateSubJurisdictionQuery("Bear River", 1),
+    recipes.CreateSubJurisdictionQuery("Central Utah", 2),
+    recipes.CreateSubJurisdictionQuery("Davis County", 3),
+    recipes.CreateSubJurisdictionQuery("Salt Lake County", 4),
+    recipes.CreateSubJurisdictionQuery("San Juan", 5),
+    recipes.CreateSubJurisdictionQuery("Southeast Utah", 6),
+    recipes.CreateSubJurisdictionQuery("Southwest Utah", 7),
+    recipes.CreateSubJurisdictionQuery("Summit County", 8),
+    recipes.CreateSubJurisdictionQuery("Tooele County", 9),
+    recipes.CreateSubJurisdictionQuery("TriCounty", 10),
+    recipes.CreateSubJurisdictionQuery("Utah County", 11),
+    recipes.CreateSubJurisdictionQuery("Wasatch County", 12),
+    recipes.CreateSubJurisdictionQuery("Weber-Morgan", 13),
 ];
 
 
 ;(async () =>
 {
+    // Launch browser
     const browser = await puppeteer.launch({headless: true});
-
     const page = (await browser.pages())[0];
 
-    await page.goto('https://coronavirus-dashboard.utah.gov/');
+    // Navigate to Utah Corona Virus site
+    await page.goto("https://coronavirus-dashboard.utah.gov/");
 
-    page.on('console', (log) => console[log._type](log._text));
+    // Redirect console messages
+    page.on("console", (log) => console[log._type](log._text));
 
     try
     {
-        jurisdictionDefs = await page.evaluate(Query, jurisdictionDefs);
+        // Do date query task
+        dateString = await page.evaluate(tasks.DoDateQueryTask);
+        console.log("Date:", dateString);
+                
+        // Do jurisdiction query task
+        jurisdictionQueryResults = 
+            await page.evaluate(
+                tasks.DoJurisdictionQueryTask,
+                jurisdictionQueries);
     }
     catch (e)
     {
-        console.log('Caught Error:');
+        console.log("Caught Error:");
         console.log(e);
         await browser.close();
         return
     }
 
-    jurisdictionDefs.forEach((jurisdictionDef) =>
+    // Create csv file, if necessary
+    if (fs.existsSync(dataFile) == false)
     {
-        let jurisdiction = new Jurisdiction(jurisdictionDef);
-        console.log(jurisdiction.SerializeAsCsv());
+        // Add date header
+        fs.appendFileSync(dataFile, "Date,");
+        
+        // Add individual jurisdiction headers
+        jurisdictionQueryResults.forEach((jurisdictionQueryResult) =>
+        {
+            fs.appendFileSync(
+                dataFile,
+                recipes.SerializeJurisdictionHeaderAsCsv(
+                    jurisdictionQueryResult));
+        });
+
+        // End header line
+        fs.appendFileSync(dataFile, "\n");
+    }
+
+    // Add data to csv
+
+    // Start with date
+    fs.appendFileSync(dataFile, dateString + ",");
+
+    // Add individual jurisdiction results
+    jurisdictionQueryResults.forEach((jurisdictionQueryResult) =>
+    {
+        let dataAsCsv = recipes.SerializeJurisdictionDataAsCsv(
+            jurisdictionQueryResult);
+        fs.appendFileSync(dataFile, dataAsCsv);
+        console.log(
+            '"' + jurisdictionQueryResult.jurisdictionName + '":',
+            dataAsCsv);
     });
 
+    // End data line
+    fs.appendFileSync(dataFile, "\n");
+
+    // Close browser
     await browser.close();
 })();
-
-
-function Query(jurisdictionDefs)
-{
-    jurisdictionDefs.forEach((jurisdictionDef) => 
-    {
-        for (const name in jurisdictionDef.selectors)
-        {
-            let resultNode = 
-                document.querySelector(jurisdictionDef.selectors[name]);
-            if (resultNode)
-            {
-                jurisdictionDef[name] = resultNode.innerHTML;
-            }
-        }
-    });
-
-    return jurisdictionDefs;
-}
-
-
-class Jurisdiction
-{
-    constructor(jurisdictionDef)
-    {
-        this.name = jurisdictionDef.name;
-        this.selectors = jurisdictionDef.selectors;
-        this.validators = jurisdictionDef.validators;
-        this.positiveCount = jurisdictionDef.positiveCount || 0;
-        this.tested = jurisdictionDef.tested || 0;
-        this.hospitalizations = jurisdictionDef.hospitalizations || 0;
-        this.deaths = jurisdictionDef.deaths || 0;
-    }
-
-    QueryAllSelectors(document)
-    {
-        for (const name in this.selectors)
-        {
-            const resultNode = document.querySelector(this.selectors[name]);
-            if (resultNode)
-            {
-                this[name] = resultNode.innerHtml;
-            }
-        }
-    }
-
-    SerializeAsCsv()
-    {
-        return [this.name, 
-            this.positiveCount, 
-            this.tested, 
-            this.hospitalizations,
-            this.deaths].join(',');
-    }
-}
